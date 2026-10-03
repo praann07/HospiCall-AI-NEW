@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HospiCall — AI Receptionist Demo</title>
+<style>
+  :root {
+    --bg: #081820;
+    --panel: #0D2830;
+    --raise: #123440;
+    --line: #1C4653;
+    --ink: #EAF4F4;
+    --ink2: #93B2B8;
+    --accent: #2FD4B5;
+    --accent-ink: #052B23;
+    --amber: #E5B054;
+    --red: #F0776B;
+    --radius-panel: 22px;
+    --radius-bubble: 16px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { height: 100%; }
+  body {
+    font-family: 'Aptos', 'Segoe UI Variable Text', 'Segoe UI', 'SF Pro Text', system-ui, sans-serif;
+    background:
+      radial-gradient(1200px 500px at 50% -10%, #0E2C36 0%, var(--bg) 60%);
+    min-height: 100vh; min-height: 100dvh;
+    color: var(--ink); display: flex; flex-direction: column;
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+  /* ---- brand row ---- */
+  .brand {
+    max-width: 780px; width: 100%; margin: 0 auto;
+    padding: 22px 20px 10px; display: flex; align-items: center; gap: 10px;
+  }
+  .brand .mark { width: 26px; height: 26px; flex: none; }
+  .brand .name { font-size: 1.12rem; font-weight: 650; letter-spacing: .1px; }
+  .brand .where { margin-left: auto; color: var(--ink2); font-size: .84rem; }
+
+  /* ---- ECG line: hospital-native, quiet when idle, alive when busy ---- */
+  .ecg { max-width: 780px; width: 100%; margin: 0 auto; padding: 0 20px; }
+  .ecg svg { display: block; width: 100%; height: 30px; }
+  .ecg path {
+    fill: none; stroke: var(--line); stroke-width: 1.5;
+    stroke-linejoin: round; stroke-linecap: round;
+  }
+  body:has(#status:not(:empty)) .ecg path,
+  body:has(.mic-btn.recording) .ecg path {
+    stroke: var(--accent);
+    stroke-dasharray: 8 6;
+    animation: ecgflow 1s linear infinite;
+  }
+  @keyframes ecgflow { to { stroke-dashoffset: -28; } }
+
+  main { flex: 1; max-width: 780px; margin: 0 auto; padding: 12px 20px 28px; width: 100%; }
+
+  /* ---- the call card ---- */
+  .call {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius-panel); padding: 20px 22px 22px;
+    box-shadow: 0 18px 50px rgba(0,0,0,.35);
+  }
+  .callhead { display: flex; align-items: center; gap: 8px; }
+  .callhead .dot {
+    width: 9px; height: 9px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 0 3px rgba(47,212,181,.18);
+  }
+  .callhead .dot.textmode { background: var(--amber); box-shadow: 0 0 0 3px rgba(229,176,84,.16); }
+  .callhead .state { color: var(--ink); font-size: .95rem; font-weight: 600; }
+  .callhead .timer {
+    margin-left: auto; font-variant-numeric: tabular-nums;
+    font-size: 1.5rem; font-weight: 650; letter-spacing: .5px; color: var(--ink);
+  }
+
+  /* ---- mic cluster ---- */
+  .mic-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 22px 0 4px; }
+  .mic-btn {
+    width: 96px; height: 96px; border-radius: 50%; border: 1px solid var(--line);
+    cursor: pointer; background: var(--raise); color: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    transition: transform .15s, border-color .15s;
+    box-shadow: 0 10px 26px rgba(0,0,0,.35);
+    user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  .mic-btn svg { width: 38px; height: 38px; }
+  .mic-btn:hover { border-color: var(--accent); }
+  .mic-btn:active { transform: scale(.95); }
+  .mic-btn.recording {
+    border-color: var(--red); color: var(--red);
+    animation: pulse 1.2s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(240,119,107,.45); }
+    50%     { box-shadow: 0 0 0 20px rgba(240,119,107,0); }
+  }
+  .mic-btn.disabled { filter: grayscale(1) brightness(.62); cursor: not-allowed; }
+  .mic-btn.disabled:hover { border-color: var(--line); }
+
+  .meter { width: min(320px, 80%); height: 6px; border-radius: 3px; background: var(--raise); overflow: hidden; visibility: hidden; }
+  .meter .fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), #7BE8D4); transition: width .06s linear; }
+  .meter.active { visibility: visible; }
+  .mic-hint { color: #AFC9CE; font-size: .88rem; min-height: 1.3em; text-align: center; }
+  #status { color: var(--accent); min-height: 1.3em; font-size: .92rem; text-align: center; font-weight: 600; }
+
+  .svc-banner {
+    display: none; margin-top: 12px; padding: 10px 14px; border-radius: 12px;
+    background: rgba(229,176,84,.07); border: 1px solid rgba(229,176,84,.35);
+    border-left: 3px solid var(--amber);
+    font-size: .86rem; line-height: 1.5; color: #D9CBA8;
+  }
+  .svc-banner.show { display: block; }
+  .svc-banner a { color: var(--amber); cursor: pointer; text-decoration: underline; }
+  .svc-banner b { color: var(--ink); font-weight: 600; }
+
+  /* ---- call log ---- */
+  .transcript {
+    margin-top: 18px; display: flex; flex-direction: column; gap: 10px;
+    max-height: min(46vh, 420px); overflow-y: auto; padding: 2px 2px 6px;
+    scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+  }
+  .bubble {
+    max-width: 84%; padding: 9px 13px 8px; border-radius: var(--radius-bubble);
+    font-size: .93rem; line-height: 1.45;
+  }
+  .bubble.patient {
+    align-self: flex-end; background: #17454D; border: 1px solid #235E68;
+    border-bottom-right-radius: 5px;
+  }
+  .bubble.ai {
+    align-self: flex-start; background: var(--raise); border: 1px solid var(--line);
+    border-bottom-left-radius: 5px;
+  }
+  .bubble.error { align-self: stretch; max-width: 100%; background: rgba(240,119,107,.08); border: 1px solid rgba(240,119,107,.4); }
+  .bubble .who {
+    display: flex; justify-content: space-between; gap: 12px;
+    font-size: .7rem; color: var(--ink2); margin-bottom: 3px; letter-spacing: .2px;
+  }
+  .bubble .chip {
+    display: inline-block; margin-top: 7px; padding: 2px 9px;
+    border-radius: 999px; font-size: .72rem; font-weight: 650;
+  }
+  .chip.booked { background: var(--accent); color: var(--accent-ink); }
+  .chip.emergency { background: rgba(240,119,107,.15); color: var(--red); border: 1px solid rgba(240,119,107,.4); }
+  .empty { text-align: center; color: var(--ink2); padding: 26px 10px; font-size: .9rem; line-height: 1.6; }
+  .empty .try { color: var(--ink); }
+
+  /* ---- composer ---- */
+  .composer { display: flex; gap: 8px; margin-top: 16px; }
+  .composer input[type=text] {
+    flex: 1; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--raise); color: var(--ink); font-size: .93rem; outline: none;
+    font-family: inherit;
+  }
+  .composer input[type=text]::placeholder { color: #6E8C93; }
+  .composer input[type=text]:focus { border-color: var(--accent); }
+  .composer .send {
+    padding: 12px 20px; border-radius: 12px; border: none; cursor: pointer;
+    background: var(--accent); color: var(--accent-ink); font-size: .93rem; font-weight: 650;
+    font-family: inherit;
+  }
+  .composer .send:hover { filter: brightness(1.08); }
+  .endrow { display: flex; justify-content: center; margin-top: 14px; }
+  .endrow .end {
+    padding: 8px 22px; border-radius: 999px; cursor: pointer; font-family: inherit;
+    background: transparent; border: 1px solid rgba(240,119,107,.45); color: var(--red); font-size: .86rem;
+  }
+  .endrow .end:hover { background: rgba(240,119,107,.08); }
+  .endrow .end:disabled { opacity: .45; cursor: default; }
+
+  footer { text-align: center; padding: 14px 16px 20px; color: #5E7F86; font-size: .78rem; }
+
+  @media (max-width: 560px) {
+    .brand { padding: 16px 16px 8px; }
+    .brand .where { display: none; }
+    .ecg { padding: 0 16px; }
+    main { padding: 10px 16px 20px; }
+    .call { padding: 16px; border-radius: 18px; }
+    .mic-btn { width: 84px; height: 84px; }
+    .callhead .timer { font-size: 1.25rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mic-btn.recording { animation: none; }
+    .ecg path { animation: none !important; }
+    * { transition-duration: .01ms !important; }
+  }
+</style>
+</head>
+<body>
+<div class="brand">
+  <svg class="mark" viewBox="0 0 26 26" aria-hidden="true">
+    <rect x="1" y="1" width="24" height="24" rx="7" fill="none" stroke="#2FD4B5" stroke-width="1.6"/>
+    <path d="M13 7v12M7 13h12" stroke="#2FD4B5" stroke-width="2.6" stroke-linecap="round"/>
+  </svg>
+  <span class="name">HospiCall</span>
+  <span class="where">City Hospital demo line</span>
+</div>
+<div class="ecg" aria-hidden="true">
+  <svg viewBox="0 0 600 36" preserveAspectRatio="none">
+    <path d="M0,22 l14,0 q5,-4 10,0 l12,0 l5,7 l6,-20 l5,24 l4,-11 l8,0 q6,-6 12,0 l24,0
+             l14,0 q5,-4 10,0 l12,0 l5,7 l6,-20 l5,24 l4,-11 l8,0 q6,-6 12,0 l24,0
+             l14,0 q5,-4 10,0 l12,0 l5,7 l6,-20 l5,24 l4,-11 l8,0 q6,-6 12,0 l24,0
+             l14,0 q5,-4 10,0 l12,0 l5,7 l6,-20 l5,24 l4,-11 l8,0 q6,-6 12,0 l24,0
+             l14,0 q5,-4 10,0 l12,0 l5,7 l6,-20 l5,24 l4,-11 l8,0 q6,-6 12,0 l24,0
+             l14,0 q5,-4 10,0 l12,0 l5,7 l6,-20 l5,24 l4,-11 l8,0 q6,-6 12,0 l24,0"/>
+  </svg>
+</div>
+<main>
+  <section class="call">
+    <div class="callhead">
+      <span class="dot" id="callDot"></span>
+      <span class="state" id="callState">Connecting…</span>
+      <span class="timer" id="callTimer" aria-label="Call duration">00:00</span>
+    </div>
+
+    <div class="mic-wrap">
+      <button class="mic-btn" id="micBtn" title="Hold to talk" aria-label="Hold to talk into the microphone">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="9" y="3" width="6" height="11" rx="3"/>
+          <path d="M5 11a7 7 0 0 0 14 0M12 18v3M8.5 21h7"/>
+        </svg>
+      </button>
+      <div class="meter" id="meter" aria-hidden="true"><div class="fill" id="meterFill"></div></div>
+      <div class="mic-hint" id="hint">Hold the mic while you speak — release to send</div>
+      <div id="status" role="status"></div>
+      <div class="svc-banner" id="svcBanner" role="alert"></div>
+    </div>
+
+    <div class="transcript" id="transcript" role="log" aria-live="polite">
+      <div class="empty" id="empty">You're on the line.<br><span class="try">Try “Book a cardiology appointment tomorrow”</span> — speak it or type it below.</div>
+    </div>
+
+    <div class="composer">
+      <input type="text" id="textIn" placeholder="Type for the receptionist…"
+             aria-label="Type a message" maxlength="1000">
+      <button id="sendBtn" class="send" aria-label="Send message">Send</button>
+    </div>
+    <div class="endrow">
+      <button id="endBtn" class="end" aria-label="End the call">End call</button>
+    </div>
+  </section>
+</main>
+<footer>Synthetic demo data — nothing leaves this machine · HospiCall © 2026</footer>
+
+<script>
+const micBtn = document.getElementById('micBtn');
+const statusEl = document.getElementById('status');
+const hintEl = document.getElementById('hint');
+const transcriptEl = document.getElementById('transcript');
+const emptyEl = document.getElementById('empty');
+const meterEl = document.getElementById('meter');
+const meterFill = document.getElementById('meterFill');
+const textIn = document.getElementById('textIn');
+const sendBtn = document.getElementById('sendBtn');
+const endBtn = document.getElementById('endBtn');
+const svcBanner = document.getElementById('svcBanner');
+const callDot = document.getElementById('callDot');
+const callStateEl = document.getElementById('callState');
+const callTimerEl = document.getElementById('callTimer');
+
+// ---- Call timer: the call starts when the page does -------------------
+const callStartedAt = Date.now();
+setInterval(() => {
+  const s = Math.floor((Date.now() - callStartedAt) / 1000);
+  const mm = String(Math.floor(s / 60)).padStart(2, '0');
+  const ss = String(s % 60).padStart(2, '0');
+  callTimerEl.textContent = mm + ':' + ss;
+}, 1000);
+
+function setCallState(text, textmode) {
+  callStateEl.textContent = text;
+  callDot.classList.toggle('textmode', !!textmode);
+}
+
+// ---- Local service detection (OmniVoice / Ollama) --------------------
+// The demo must be usable with none, some, or all local services: text
+// chat always works; the mic is enabled only when OmniVoice answers.
+let voiceMode = true;
+
+function setVoiceMode(enabled) {
+  voiceMode = enabled;
+  micBtn.classList.toggle('disabled', !enabled);
+  micBtn.title = enabled ? 'Hold to talk'
+    : 'Mic disabled — OmniVoice Studio (port 3900) is not running';
+  if (!recording) {
+    hintEl.textContent = enabled
+      ? 'Hold the mic while you speak — release to send'
+      : 'Voice is offline — type below, booking still works';
+  }
+  setCallState(enabled ? 'Connected' : 'Connected · text mode', !enabled);
+}
+
+async function refreshServices() {
+  let deps = null;
+  try {
+    const r = await fetch('/health');
+    if (r.ok) deps = (await r.json()).dependencies;
+  } catch (e) { /* backend unreachable — keep current mode */ }
+  if (!deps) return;
+  setVoiceMode(!!deps.omnivoice);
+  const missing = [];
+  if (!deps.omnivoice) missing.push('OmniVoice Studio (voice I/O)');
+  if (!deps.ollama) missing.push('Ollama (LLM fallback)');
+  if (missing.length) {
+    svcBanner.innerHTML = 'Running without ' + missing.join(' and ') + '. ' +
+      (deps.omnivoice ? '' : 'Speech and spoken replies need OmniVoice Studio at <b>http://localhost:3900</b>. ') +
+      (deps.ollama ? '' : 'Unusual questions fall back to built-in scripts instead of the LLM. ') +
+      'Start them, then <a id="svcRecheck">check again</a>.';
+    svcBanner.classList.add('show');
+    document.getElementById('svcRecheck').addEventListener('click', refreshServices);
+  } else {
+    svcBanner.classList.remove('show');
+    svcBanner.innerHTML = '';
+  }
+}
+
+// Survive page refreshes: keep the same call_id for the browser tab.
+let callId = sessionStorage.getItem('hospicall_call_id');
+if (!callId) {
+  callId = 'browser-' + Date.now();
+  sessionStorage.setItem('hospicall_call_id', callId);
+}
+let mediaRecorder = null;
+let chunks = [];
+let recording = false;
+let releasePending = false;  // released before getUserMedia resolved
+let audioCtx = null;
+let analyser = null;
+let meterRAF = null;
+let currentAudio = null;     // for barge-in: stop playback when the user talks
+
+micBtn.addEventListener('pointerdown', e => { e.preventDefault(); releasePending = false; startRecording(); });
+window.addEventListener('pointerup', () => { releasePending = true; stopRecording(); });
+window.addEventListener('pointercancel', () => { releasePending = true; stopRecording(); });
+micBtn.addEventListener('contextmenu', e => e.preventDefault());
+
+async function startRecording() {
+  if (recording) return;
+  if (!voiceMode) { hintEl.textContent = 'Voice is offline — type your message below instead.'; return; }
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }  // barge-in
+  statusEl.textContent = 'Mic access…';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (releasePending) {  // user already released while permissions loaded
+      stream.getTracks().forEach(t => t.stop());
+      statusEl.textContent = '';
+      return;
+    }
+    chunks = [];
+    const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : '';
+    mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    mediaRecorder.ondataavailable = e => chunks.push(e.data);
+    mediaRecorder.onstop = sendAudio;
+    mediaRecorder.start();
+    recording = true;
+    micBtn.classList.add('recording');
+    hintEl.textContent = 'Listening… speak now, release to send';
+    statusEl.textContent = '';
+    startMeter(stream);
+  } catch (err) {
+    statusEl.textContent = 'Microphone blocked — check browser permissions, or type below instead.';
+    recording = false;
+  }
+}
+
+function startMeter(stream) {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  audioCtx.createMediaStreamSource(stream).connect(analyser);
+  meterEl.classList.add('active');
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  const tick = () => {
+    analyser.getByteTimeDomainData(data);
+    let peak = 0;
+    for (let i = 0; i < data.length; i++) {
+      const v = Math.abs(data[i] - 128) / 128;
+      if (v > peak) peak = v;
+    }
+    meterFill.style.width = Math.min(100, peak * 180) + '%';
+    meterRAF = requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+function stopRecording() {
+  if (!recording) return;  // releasePending handles the not-yet-started case
+  recording = false;
+  micBtn.classList.remove('recording');
+  cancelAnimationFrame(meterRAF);
+  meterEl.classList.remove('active');
+  meterFill.style.width = '0%';
+  hintEl.textContent = 'Processing…';
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+  mediaRecorder.stream.getTracks().forEach(t => t.stop());
+  if (audioCtx) audioCtx.close();
+}
+
+async function sendAudio() {
+  if (!chunks.length) { hintEl.textContent = 'Hold the mic while you speak'; return; }
+  const blob = new Blob(chunks, { type: chunks[0] ? chunks[0].type : 'audio/webm' });
+  statusEl.textContent = 'Transcribing & thinking…';
+  const fd = new FormData();
+  fd.append('file', blob, 'recording.webm');
+  try {
+    const res = await fetch('/calls/audio?call_id=' + encodeURIComponent(callId), { method: 'POST', body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+    statusEl.textContent = '';
+    addBubble('patient', 'You', data.user_text || '(silence)');
+    addBubble('ai', 'HospiCall', data.response, { intent: data.intent });
+    await speak(data.response);
+  } catch (err) {
+    statusEl.textContent = '';
+    addBubble('error', 'System', 'Failed: ' + err.message);
+    if (/503|unreachable/i.test(err.message)) refreshServices();
+  }
+}
+
+sendBtn.addEventListener('click', sendText);
+textIn.addEventListener('keydown', e => { if (e.key === 'Enter') sendText(); });
+
+// Post a message; if the server restarted (session gone, 404), re-register
+// the call once and retry — the demo self-heals instead of erroring out.
+// (Named sendTurn: shadowing window.postMessage breaks embedded browsers.)
+async function sendTurn(text) {
+  const send = () => fetch('/calls/message', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ call_id: callId, text })
+  });
+  let res = await send();
+  if (res.status === 404) {
+    const s = await fetch('/calls/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ call_id: callId, phone: 'browser-demo' })
+    });
+    if (s.ok) res = await send();
+  }
+  return res;
+}
+
+async function sendText() {
+  const text = textIn.value.trim();
+  if (!text) return;
+  textIn.value = '';
+  addBubble('patient', 'You', text);
+  statusEl.textContent = 'Thinking…';
+  try {
+    const res = await sendTurn(text);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+    statusEl.textContent = '';
+    addBubble('ai', 'HospiCall', data.response, { intent: data.intent });
+    await speak(data.response);
+  } catch (err) {
+    statusEl.textContent = '';
+    addBubble('error', 'System', 'Failed: ' + err.message);
+  }
+}
+
+endBtn.addEventListener('click', async () => {
+  try { await fetch('/calls/' + encodeURIComponent(callId) + '/end', { method: 'POST' }); } catch (e) {}
+  sessionStorage.removeItem('hospicall_call_id');
+  endBtn.disabled = true;
+  setCallState('Call ended', false);
+  callDot.style.background = 'var(--ink2)';
+  callDot.style.boxShadow = 'none';
+  addBubble('ai', 'HospiCall', 'Call ended. Refresh the page to start a new call.');
+});
+
+// Turn metadata shown in the log: a booking that hit the database, or
+// emergency guidance, is exactly what a demo viewer wants to spot.
+const INTENT_CHIPS = {
+  booked: ['booked', 'Appointment booked'],
+  emergency: ['emergency', 'Emergency guidance'],
+};
+
+function addBubble(cls, who, text, meta) {
+  if (emptyEl) emptyEl.remove();
+  const div = document.createElement('div');
+  div.className = 'bubble ' + cls;
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  let html = '<span class="who"><span>' + who + '</span><span>' + time + '</span></span>' + escapeHtml(text);
+  const chip = INTENT_CHIPS[(meta && meta.intent) || ''];
+  if (chip) html += '<br><span class="chip ' + chip[0] + '">' + chip[1] + '</span>';
+  div.innerHTML = html;
+  transcriptEl.appendChild(div);
+  transcriptEl.scrollTop = transcriptEl.scrollHeight;
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Split a reply into speakable sentences. Abbreviations that end in a
+// period (Dr., a.m., …) are masked first so they don't split mid-name.
+// Only fully-dotted forms are masked: bare "AM"/"PM" must keep their
+// sentence-ending period intact.
+function splitSentences(text) {
+  const MASK = '\u0001';
+  const guarded = text
+    .replace(/\b(Dr|Mr|Mrs|Ms|St|No)\./g, '$1' + MASK)
+    .replace(/\b([ap])\.m\./gi, '$1' + MASK + 'm' + MASK);
+  const parts = guarded.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) || [guarded];
+  return parts.map(p => p.replace(new RegExp(MASK, 'g'), '.').trim()).filter(Boolean);
+}
+
+function fetchSpeech(sentence) {
+  return fetch('/synthesize', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: sentence })
+  }).then(res => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.blob(); });
+}
+
+function playBlob(blob) {
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+  currentAudio = audio;
+  return new Promise((resolve, reject) => {
+    audio.onended = () => { URL.revokeObjectURL(url); currentAudio = null; resolve(); };
+    audio.onerror = (e) => { URL.revokeObjectURL(url); currentAudio = null; reject(e); };
+    audio.play();
+  });
+}
+
+// Streamed TTS: synthesize sentence N+1 while sentence N plays, so the
+// caller hears the first sentence as soon as it is ready instead of
+// waiting for the whole reply to be synthesized.
+async function speak(text) {
+  if (!text) return;
+  const sentences = splitSentences(text);
+  if (!sentences.length) return;
+  statusEl.textContent = 'Speaking…';
+  try {
+    let next = fetchSpeech(sentences[0]);
+    for (let i = 0; i < sentences.length; i++) {
+      const blob = await next;
+      if (i + 1 < sentences.length) next = fetchSpeech(sentences[i + 1]);
+      await playBlob(blob);
+    }
+  } catch (e) {
+    statusEl.textContent = '(TTS unavailable — reply shown as text)';
+  }
+  statusEl.textContent = '';
+  hintEl.textContent = voiceMode
+    ? 'Hold the mic while you speak — release to send'
+    : 'Voice is offline — type below, booking still works';
+}
+
+// Register (or renew) the call session on load. If the server restarted but
+// sessionStorage kept an old call_id, end it and start fresh.
+(async function ensureSession() {
+  try {
+    let r = await fetch('/calls/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ call_id: callId, phone: 'browser-demo' })
+    });
+    if (r.status === 409) {
+      await fetch('/calls/' + encodeURIComponent(callId) + '/end', { method: 'POST' });
+      r = await fetch('/calls/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ call_id: callId, phone: 'browser-demo' })
+      });
+    }
+    // Open the log with the receptionist's greeting, like a real call.
+    if (r.ok && !document.querySelector('.bubble')) {
+      const greeting = (await r.json().catch(() => ({}))).greeting;
+      if (greeting) addBubble('ai', 'HospiCall', greeting);
+    }
+  } catch (e) { /* server unreachable; first message will surface the error */ }
+  refreshServices();
+})();
+</script>
+</body>
+</html>
